@@ -410,6 +410,16 @@
             box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
         }
 
+        .stat.stat-filter {
+            cursor: pointer;
+        }
+
+        .stat.active {
+            background: #fff4b8;
+            border-color: #FFD700;
+            box-shadow: 0 0 16px rgba(255, 215, 0, 0.45);
+        }
+
         .stat-num {
             font-family: 'Righteous', cursive;
             font-size: 42px;
@@ -422,6 +432,35 @@
             font-weight: 800;
             color: #1a1a1a;
             text-transform: uppercase;
+        }
+
+        .feed-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 2px solid #00FF00;
+            background: rgba(255, 255, 255, 0.08);
+            color: #bfffbf;
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .feed-filter button {
+            border: 2px solid #00FF00;
+            border-radius: 999px;
+            background: transparent;
+            color: #bfffbf;
+            font-weight: 800;
+            padding: 2px 10px;
+            cursor: pointer;
+        }
+
+        .timeline-entry.match {
+            outline: 2px solid #00FF00;
+            background: rgba(0, 255, 0, 0.12);
         }
 
         /* CTA */
@@ -532,6 +571,11 @@
                 <div class="signal-badge">72% MIXED SIGNALS</div>
             </div>
 
+            <div id="feed-filter" class="feed-filter" hidden>
+                <span id="feed-filter-text"></span>
+                <button id="feed-filter-clear" type="button">Clear</button>
+            </div>
+
             <div class="timeline">
                 <div class="timeline-entry warm">
                     <div class="timeline-time">jan 15 â€¢ 11:23pm</div>
@@ -560,11 +604,11 @@
                     <div class="stat-num">43%</div>
                     <div class="stat-label">who initiates</div>
                 </div>
-                <div class="stat">
+                <div class="stat stat-filter" data-filter="slow_reply">
                     <div class="stat-num">4.1x</div>
                     <div class="stat-label">slower replies</div>
                 </div>
-                <div class="stat">
+                <div class="stat stat-filter" data-filter="red_flag">
                     <div class="stat-num">15</div>
                     <div class="stat-label">red flags</div>
                 </div>
@@ -597,8 +641,13 @@
         const signalBadge = document.querySelector(".signal-badge");
         const timelineEl = document.querySelector(".timeline");
         const statNums = document.querySelectorAll(".stat .stat-num");
+        const statFilterCards = document.querySelectorAll(".stat.stat-filter");
+        const feedFilterEl = document.getElementById("feed-filter");
+        const feedFilterTextEl = document.getElementById("feed-filter-text");
+        const feedFilterClearEl = document.getElementById("feed-filter-clear");
         let readyUploadId = "";
         let analyzing = false;
+        let activeFilter = "all";
 
         function apiUrl(path) {
             const base = (window.API_BASE || "").trim();
@@ -646,8 +695,11 @@
                 ? timelineRows.map((row) => {
                     const type = (row.type === "warm" || row.type === "cool" || row.type === "mixed") ? row.type : "mixed";
                     const tags = (row.tags || []).slice(0, 3);
+                    const rowId = String(row.message_id || row.id || row.timestamp || Math.random()).replaceAll('"', "");
+                    const filterTags = inferFilterTags(row).join(" ");
+                    const dataTagsAttr = filterTags ? ' data-tags="' + escapeHtml(filterTags) + '"' : "";
                     return (
-                        '<div class="timeline-entry ' + type + '">' +
+                        '<div class="timeline-entry ' + type + '" data-id="' + escapeHtml(rowId) + '"' + dataTagsAttr + '>' +
                             '<div class="timeline-time">' + escapeHtml(formatTs(row.timestamp)) + '</div>' +
                             '<div class="timeline-msg">"' + escapeHtml(row.message || "") + '"</div>' +
                             tags.map((tag) => '<span class="tag ' + type + '">' + escapeHtml(tag) + '</span>').join("") +
@@ -660,6 +712,83 @@
             if (statNums[0]) statNums[0].textContent = String(Math.round(Number(stats.initiation_percent || 0))) + "%";
             if (statNums[1]) statNums[1].textContent = String(Number(stats.reply_delay_ratio || 1).toFixed(1)) + "x";
             if (statNums[2]) statNums[2].textContent = String(Math.round(Number(stats.red_flags || 0)));
+            applyFilter();
+        }
+
+        function inferFilterTags(row) {
+            const tags = [];
+            const rowTags = Array.isArray(row.tags) ? row.tags.map((item) => String(item).toLowerCase()) : [];
+            const meta = row.meta || row.metadata || {};
+
+            const hasSlowReply = Boolean(
+                row.slow_reply === true ||
+                meta.slow_reply === true ||
+                typeof row.reply_delay_sec === "number" ||
+                typeof meta.reply_delay_sec === "number" ||
+                typeof row.delay === "number" ||
+                typeof meta.delay === "number" ||
+                rowTags.some((item) => item.includes("slow") || item.includes("delay") || item.includes("latency"))
+            );
+            if (hasSlowReply) tags.push("slow_reply");
+
+            const hasRedFlag = Boolean(
+                row.red_flag === true ||
+                meta.red_flag === true ||
+                meta.reason ||
+                row.reason ||
+                rowTags.some((item) => item.includes("red flag") || item.includes("boundary") || item.includes("contradiction") || item.includes("mixed signal"))
+            );
+            if (hasRedFlag) tags.push("red_flag");
+
+            return tags;
+        }
+
+        function setActiveFilter(nextFilter) {
+            activeFilter = activeFilter === nextFilter ? "all" : nextFilter;
+            applyFilter();
+        }
+
+        function applyFilter() {
+            const cards = Array.from(timelineEl.querySelectorAll(".timeline-entry"));
+            const isFilterActive = activeFilter !== "all";
+
+            statFilterCards.forEach((card) => {
+                card.classList.toggle("active", card.dataset.filter === activeFilter);
+            });
+
+            if (!isFilterActive) {
+                cards.forEach((card) => {
+                    card.hidden = false;
+                    card.classList.remove("match");
+                    card.removeAttribute("data-match");
+                });
+                feedFilterEl.hidden = true;
+                return;
+            }
+
+            const matchedIndexes = [];
+            cards.forEach((card, index) => {
+                const tagSet = (card.dataset.tags || "").split(/\s+/).filter(Boolean);
+                if (tagSet.includes(activeFilter)) matchedIndexes.push(index);
+            });
+
+            const visibleIndexes = new Set();
+            matchedIndexes.forEach((index) => {
+                visibleIndexes.add(index);
+                if (index > 0) visibleIndexes.add(index - 1);
+                if (index < cards.length - 1) visibleIndexes.add(index + 1);
+            });
+
+            cards.forEach((card, index) => {
+                const isMatch = matchedIndexes.includes(index);
+                card.hidden = !visibleIndexes.has(index);
+                card.classList.toggle("match", isMatch);
+                if (isMatch) card.dataset.match = "1";
+                else card.removeAttribute("data-match");
+            });
+
+            feedFilterTextEl.textContent = "Showing: " + (activeFilter === "slow_reply" ? "Slow replies" : "Red flags");
+            feedFilterEl.hidden = false;
         }
 
         async function uploadFile(file) {
@@ -699,24 +828,29 @@
             try {
                 console.log("[analyze] upload_id:", readyUploadId);
                 statusEl.textContent = "analyzing...";
-                const analyzeRes = await fetch(apiUrl("/compat/uploads/" + readyUploadId + "/analyze"), { method: "POST" });
+                const analyzeRes = await fetch(apiUrl("/compat/uploads/" + readyUploadId + "/analyze"), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                });
+                const rawText = await analyzeRes.text();
                 let analyzePayload = null;
                 try {
-                    analyzePayload = await analyzeRes.json();
+                    analyzePayload = rawText ? JSON.parse(rawText) : null;
                 } catch (_) {
                     analyzePayload = null;
                 }
-                console.log("[analyze] response:", { status: analyzeRes.status, body: analyzePayload });
+                console.log("[analyze] http status:", analyzeRes.status);
+                console.log("[analyze] raw response text:", rawText);
+                console.log("[analyze] parsed json:", analyzePayload);
                 if (!analyzeRes.ok) {
                     let detail = "analysis failed. please retry.";
-                    if (analyzeRes.status === 400 && analyzePayload && analyzePayload.detail) {
-                        detail = String(analyzePayload.detail);
-                    } else if (analyzePayload && analyzePayload.detail) {
-                        detail = String(analyzePayload.detail);
-                    }
+                    if (analyzePayload && analyzePayload.detail) detail = String(analyzePayload.detail);
+                    else if (analyzePayload && analyzePayload.message) detail = String(analyzePayload.message);
+                    else if (rawText) detail = rawText;
                     throw new Error(detail);
                 }
-                const report = analyzePayload || {};
+                const report = (analyzePayload && analyzePayload.result) ? analyzePayload.result : (analyzePayload || {});
                 renderReport(report);
                 statusEl.textContent = "analysis complete";
             } catch (err) {
@@ -734,6 +868,15 @@
         analyzeBtn.addEventListener("click", function (event) {
             event.preventDefault();
             analyzeUploadedFile();
+        });
+        statFilterCards.forEach((card) => {
+            card.addEventListener("click", function () {
+                setActiveFilter(card.dataset.filter || "all");
+            });
+        });
+        feedFilterClearEl.addEventListener("click", function () {
+            activeFilter = "all";
+            applyFilter();
         });
         fileInput.addEventListener("change", function (event) {
             const file = event.target.files && event.target.files[0];
