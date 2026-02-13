@@ -1,7 +1,7 @@
 # Frontend-Backend Integration Notes
 
 ## Current Integration
-- Frontend is served from `GET /` using `app/static/index.html`.
+- Frontend is served from `GET /` using root-level `index.html`.
 - Frontend flow is now explicit two-step:
   1. Upload file
   2. Click `Analyze texts`

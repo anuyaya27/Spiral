@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def root() -> FileResponse:
-        return FileResponse(Path("app/static/index.html"))
+        return FileResponse(Path("index.html"))
 
     return app
 
